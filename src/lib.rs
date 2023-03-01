@@ -2,18 +2,20 @@ use std::{thread, sync::{mpsc, Arc, Mutex}};
 
 struct Worker {
     id: usize,
-    handle: thread::JoinHandle<()>,
+    thread: Option<thread::JoinHandle<()>>,
 }
 
 impl Worker {
     fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
+        let thread = thread::spawn(move || loop {
+            let job = receiver.lock().unwrap().recv().unwrap();
+            println!("Worker {id} got a job. Executing...");
+            job();
+        });
+
         Worker {
             id,
-            handle: thread::spawn(move || loop {
-                let job = receiver.lock().unwrap().recv().unwrap();
-                println!("Worker {id} got a job. Executing...");
-                job();
-            }),
+            thread: Some(thread),
         }
     }
 }
@@ -57,5 +59,14 @@ impl ThreadPool {
     {
         let job = Box::new(f);
         self.sender.send(job).unwrap();
+    }
+
+    fn drop(&mut self) {
+        for worker in &mut self.workers {
+            println!("Shutting down worker {}", worker.id);
+            if let Some(thread) = worker.thread.take() {
+                thread.join().unwrap();
+            }
+        }
     }
 }
